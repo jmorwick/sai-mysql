@@ -15,25 +15,17 @@ import java.util.stream.StreamSupport;
  */
 public class MysqlDBInterface implements DBInterface {
 
+    private Logger logger = Logger.getLogger(MysqlDBInterface.class.getName());
+
+
     public static final String INIT_SQL =
-            "DROP TABLE IF EXISTS `feature_isa_relationships`;\n" +
-                    "CREATE TABLE `feature_isa_relationships` (\n" +
-                    "  `parent_id` int(11) NOT NULL COMMENT 'tag (node_instances->id)',\n" +
-                    "  `feature_id` int(11) NOT NULL COMMENT 'tag (node_instances->id)',\n" +
-                    "  UNIQUE KEY `parent_id` (`parent_id`),\n" +
-                    "  UNIQUE KEY `feature_id` (`feature_id`)\n" +
-                    ") ENGINE=MyISAM DEFAULT CHARSET=latin1;\n" +
-                    "\n" +
                     "DROP TABLE IF EXISTS `graph_instances`;\n" +
                     "CREATE TABLE `graph_instances` (\n" +
                     "  `id` int(11) NOT NULL auto_increment,\n" +
                     "  `nodes` int(11) NOT NULL,\n" +
                     "  `edges` int(11) NOT NULL,\n" +
                     "  `features` int(11) NOT NULL COMMENT 'number of associated features',\n" +
-                    "  `is_index` BOOLEAN NOT NULL,\n" +
-                    "  `checked` BOOLEAN NOT NULL,\n" +
-                    "  PRIMARY KEY  (`id`),\n" +
-                    "  KEY `is_index` (`is_index`)\n" +
+                    "  PRIMARY KEY  (`id`)\n" +
                     ") ENGINE=MyISAM DEFAULT CHARSET=latin1 COMMENT='instances of graphs';\n" +
                     "\n" +
                     "DROP TABLE IF EXISTS `node_instances`;\n" +
@@ -57,16 +49,6 @@ public class MysqlDBInterface implements DBInterface {
                     "  KEY `to_node_id` (`graph_id`,`to_node_id`)\n" +
                     ") ENGINE=MyISAM DEFAULT CHARSET=latin1 COMMENT='edge between two nodes';\n" +
                     "\n" +
-                    "DROP TABLE IF EXISTS `feature_instances`;\n" +
-                    "CREATE TABLE `feature_instances` (\n" +
-                    "  `id` int(11) NOT NULL auto_increment,\n" +
-                    "  `name` varchar(256) NOT NULL COMMENT 'unique name of a tag within a class',\n" +
-                    "  `featureclass` varchar(256) NOT NULL COMMENT 'unique name of a class of tags',\n" +
-                    "  PRIMARY KEY  (`id`),\n" +
-                    "  UNIQUE KEY `name` (`name`, `featureclass`),\n" +
-                    "  KEY `featureclass` (`featureclass`)\n" +
-                    ") ENGINE=MyISAM DEFAULT CHARSET=latin1;\n" +
-                    "\n" +
                     "DROP TABLE IF EXISTS `node_features`;\n" +
                     "CREATE TABLE `node_features` (\n" +
                     "  `graph_id` int(11) NOT NULL COMMENT 'tagged graph (graph_instances->id)',\n" +
@@ -74,7 +56,7 @@ public class MysqlDBInterface implements DBInterface {
                     "  `feature_name` varchar(256) NOT NULL,\n" +
                     "  `feature_value` varchar(256) NOT NULL,\n" +
                     "  KEY `node_id` (`graph_id`,`node_id`),\n" +
-                    "  KEY `feature_id` (`feature_name, feature_value`)\n" +
+                    "  KEY `feature_id` (`feature_name`, `feature_value`)\n" +
                     ") ENGINE=MyISAM DEFAULT CHARSET=latin1 COMMENT='associates tags to nodes';\n" +
                     "\n" +
                     "DROP TABLE IF EXISTS `graph_features`;\n" +
@@ -83,7 +65,7 @@ public class MysqlDBInterface implements DBInterface {
                     "  `feature_name` varchar(256) NOT NULL,\n" +
                     "  `feature_value` varchar(256) NOT NULL,\n" +
                     "  KEY `graph_id` (`graph_id`),\n" +
-                    "  KEY `feature_id` (`feature_name, feature_value`)\n" +
+                    "  KEY `feature_id` (`feature_name`, `feature_value`)\n" +
                     ") ENGINE=MyISAM DEFAULT CHARSET=latin1 COMMENT='associates tags to nodes';\n" +
                     "\n" +
                     "DROP TABLE IF EXISTS `edge_features`;\n" +
@@ -93,12 +75,21 @@ public class MysqlDBInterface implements DBInterface {
                     "  `feature_name` varchar(256) NOT NULL,\n" +
                     "  `feature_value` varchar(256) NOT NULL,\n" +
                     "  KEY `edge_id` (`graph_id`,`edge_id`),\n" +
-                    "  KEY `feature_id` (`feature_name, feature_value`)\n" +
+                    "  KEY `feature_id` (`feature_name`, `feature_value`)\n" +
                     ") ENGINE=MyISAM DEFAULT CHARSET=latin1 COMMENT='associates tags to nodes';\n";
 
     private Statement statement;
     private Connection connection;
     private static boolean driverLoaded = false;
+
+    public MysqlDBInterface(String DBHost, String DBName, String DBUsername, String DBPassword, boolean initialize) {
+        this(DBHost, DBName, DBUsername, DBPassword);
+        if(initialize) {
+            logger.info("Initializing Database");
+            initializeDatabase();
+        }
+    }
+
 
     public MysqlDBInterface(String DBHost,
                             String DBName,
@@ -207,17 +198,19 @@ public class MysqlDBInterface implements DBInterface {
             private int id = 0;
 
             public boolean hasNext() {
-                String sql = "SELECT id FROM graph_instances WHERE is_index = FALSE AND id > " + id +
+                String sql = "SELECT id FROM graph_instances WHERE id > " + id +
                         " ORDER BY id LIMIT 1";
                 return getQueryResults(sql).size() > 0;
             }
 
             public Integer next() {
-                String sql = "SELECT id FROM graph_instances WHERE is_index = FALSE AND id > " + id +
+                String sql = "SELECT id FROM graph_instances WHERE id > " + id +
                         " ORDER BY id LIMIT 1";
                 List<Map<String, String>> ls = getQueryResults(sql);
-                if (ls.size() > 0)
-                    return Integer.parseInt(ls.get(0).get("id"));
+                if (ls.size() > 0) {
+                    id = Integer.parseInt(ls.get(0).get("id"));
+                    return id;
+                }
 
                 throw new IllegalStateException("No elements remaining in iterator");
             }
@@ -233,7 +226,7 @@ public class MysqlDBInterface implements DBInterface {
         Set<Feature> features = g.getFeaturesSet();
 
         updateDB("INSERT INTO graph_instances VALUES (NULL, " +
-                nodeIds.size() + ", " + edgeIds.size() + ", " + features.size());
+                nodeIds.size() + ", " + edgeIds.size() + ", " + features.size() + ");");
         int gid = getLastAutoIncrement();
 
         for (Feature f : features) {
@@ -316,7 +309,7 @@ public class MysqlDBInterface implements DBInterface {
                 "graph_id = "+graphId);
         for(Map<String,String> rm : rs) {
             try {
-                g.addFeature(new Feature(rm.get("name"), rm.get("value")));
+                g.addFeature(new Feature(rm.get("feature_name"), rm.get("feature_value")));
             } catch(NumberFormatException e) {
                 throw new IllegalStateException("corrupt data for graph #"+graphId + " data: " + rm);
             }
@@ -338,7 +331,7 @@ public class MysqlDBInterface implements DBInterface {
             g.addNode(nid);
 
             for(Map<String,String> tagrm : tagrs)
-                g.addNodeFeature(nid, new Feature(rm.get("name"), rm.get("value")));
+                g.addNodeFeature(nid, new Feature(tagrm.get("feature_name"), tagrm.get("feature_value")));
         }
 
         //load edges
@@ -355,9 +348,9 @@ public class MysqlDBInterface implements DBInterface {
                     Integer.parseInt(rm.get("from_node_id")),
                     Integer.parseInt(rm.get("to_node_id")));
 
-            for(Map<String,String> tagrm : tagrs)
-                g.addEdgeFeature(eid, new Feature(rm.get("name"), rm.get("value")));
-
+            for(Map<String,String> tagrm : tagrs) {
+                g.addEdgeFeature(eid, new Feature(tagrm.get("feature_name"), tagrm.get("feature_value")));
+            }
         }
 
         return f.copy(g);
@@ -374,14 +367,14 @@ public class MysqlDBInterface implements DBInterface {
     public double getNodesInDatabase() {
         return Integer.parseInt(
                 getQueryResults("SELECT COUNT(*) FROM graph_instances gi, node_instances ni WHERE "+
-                        "gi.id = ni.graph_id AND gi.is_index = FALSE").get(0).get("COUNT(*)"));
+                        "gi.id = ni.graph_id").get(0).get("COUNT(*)"));
     }
 
     /** returns the number of edges in the database */
     public double getEdgesInDatabase() {
         return Integer.parseInt(
                 getQueryResults("SELECT COUNT(*) FROM graph_instances gi, edge_instances ni WHERE "+
-                        "gi.id = ni.graph_id AND gi.is_index = FALSE").get(0).get("COUNT(*)"));
+                        "gi.id = ni.graph_id").get(0).get("COUNT(*)"));
     }
 
     @Override
